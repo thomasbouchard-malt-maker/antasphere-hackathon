@@ -40,6 +40,24 @@ npm run dev                    # http://localhost:8787
 The microphone needs the page to be on `https://` or `localhost`. Voice uses the
 browser's language (`navigator.language`).
 
+## Test environment (`playground/`)
+
+A fake invoicing app ("Ledgerly") to try the guide on, and a Playwright smoke test that
+loads the unpacked extension into Chromium, activates it, asks a question and saves
+screenshots of each state to `playground/shots/`.
+
+```bash
+cd playground && npm install
+npm run app                        # demo app on http://localhost:5173
+(cd ../server && npm run mock)     # in another terminal: guide server, no Claude calls
+npm run smoke                      # headless; HEADED=1 npm run smoke to watch it
+```
+
+Activating the guide (toolbar icon, **Alt+G**, or a resumed task) lights an animated glowing
+frame around the page and slides a toolbar up at the bottom centre: mic, text box, Repeat,
+Next, Stop, and ✕ (or **Esc**) to close. The colours are CSS variables at the top of the
+shadow-DOM style in `extension/content.js` (`--accent`, `--accent-2`, …).
+
 ## Layout
 
 | Path | What |

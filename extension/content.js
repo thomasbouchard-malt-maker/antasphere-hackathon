@@ -1,5 +1,5 @@
 // Content script: the on-page guide. Collects clickable elements, shows the
-// floating panel + animated cursor, handles voice in/out, and runs the
+// activation aura, bottom toolbar + animated cursor, handles voice in/out, and runs the
 // "point -> wait for the user's click -> next step" loop.
 
 (() => {
@@ -81,55 +81,127 @@
   const root = host.attachShadow({ mode: "open" });
   root.innerHTML = `
     <style>
-      .bubble, .panel, .panel button, .panel input { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      :host { --accent: #e8743b; --accent-soft: rgba(232,116,59,.45); --accent-2: #f5b38a;
+        --bar-bg: rgba(24,24,27,.86); --bar-fg: #fafafa; --bar-muted: #a1a1aa; --bar-line: rgba(255,255,255,.12); }
+      * { box-sizing: border-box; }
+      .ui { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+      /* --- Activation aura: glowing animated frame around the whole viewport --- */
+      .aura { position: fixed; inset: 0; opacity: 0; transition: opacity .5s ease; }
+      .ui.active .aura { opacity: 1; }
+      .aura .glow { position: absolute; inset: 0;
+        box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 28px 6px var(--accent-soft), inset 0 0 90px 10px rgba(232,116,59,.18);
+        animation: breathe 3.2s ease-in-out infinite; }
+      .aura .edge { position: absolute; inset: 0; padding: 3px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2), #fff6, var(--accent-2), var(--accent)) 0 0 / 300% 100%;
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor; mask-composite: exclude;
+        animation: flow 4s linear infinite; }
+      /* the entry "sweep": a bright flash that contracts onto the frame */
+      .aura .flash { position: absolute; inset: 0; opacity: 0;
+        box-shadow: inset 0 0 0 0 transparent, inset 0 0 220px 80px rgba(232,116,59,.35); }
+      .ui.entering .aura .flash { animation: flash .9s ease-out; }
+      .ui[data-state=listening] .aura .glow { animation-duration: 1.1s; }
+      .ui[data-state=thinking] .aura .edge { animation-duration: 1.2s; }
+      @keyframes breathe { 50% { opacity: .55; } }
+      @keyframes flow { to { background-position: 300% 0; } }
+      @keyframes flash { 0% { opacity: 1; transform: scale(.985); } 100% { opacity: 0; transform: scale(1); } }
+
+      /* --- Pointer --- */
       .cursor { position: fixed; left: 0; top: 0; width: 44px; height: 44px; opacity: 0;
         transition: transform .9s cubic-bezier(.22,1,.36,1), opacity .3s; will-change: transform;
         filter: drop-shadow(0 3px 6px rgba(0,0,0,.35)); }
       .cursor.on { opacity: 1; }
-      .ring { position: fixed; border: 4px solid #2563eb; border-radius: 10px; opacity: 0;
+      .ring { position: fixed; border: 4px solid var(--accent); border-radius: 10px; opacity: 0;
         box-shadow: 0 0 0 9999px rgba(15,23,42,.18); transition: opacity .3s; }
       .ring.on { opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
-      @keyframes pulse { 50% { border-color: #60a5fa; transform: scale(1.04); } }
+      @keyframes pulse { 50% { border-color: var(--accent-2); transform: scale(1.04); } }
       .bubble { position: fixed; max-width: 320px; background: #1e293b; color: #fff; font-size: 18px;
         line-height: 1.4; padding: 12px 16px; border-radius: 14px; opacity: 0; transition: opacity .3s; }
       .bubble.on { opacity: 1; }
-      .panel { position: fixed; right: 20px; bottom: 20px; width: 340px; pointer-events: auto;
-        background: #fff; color: #0f172a; border-radius: 18px; padding: 16px;
-        box-shadow: 0 10px 40px rgba(0,0,0,.25); font-size: 18px; }
-      .panel.hidden { display: none; }
-      .row { display: flex; gap: 8px; align-items: center; }
-      .mic { width: 64px; height: 64px; border-radius: 50%; border: 0; background: #2563eb; color: #fff;
-        font-size: 28px; cursor: pointer; flex: none; }
-      .mic.listening { background: #dc2626; animation: pulse 1s infinite; }
-      .text { flex: 1; font-size: 16px; padding: 10px; border: 2px solid #cbd5e1; border-radius: 10px; min-width: 0; }
-      .say { margin: 12px 0 8px; min-height: 2.8em; font-size: 20px; line-height: 1.35; }
-      .meta { font-size: 14px; color: #64748b; }
-      .btns { display: flex; gap: 6px; margin-top: 10px; }
-      .btns button { flex: 1; font-size: 16px; padding: 10px; border-radius: 10px; border: 2px solid #cbd5e1;
-        background: #f8fafc; cursor: pointer; }
-      .error { color: #b91c1c; }
+
+      /* --- Bottom-centre dock: caption card + toolbar --- */
+      .dock { position: fixed; left: 50%; bottom: 22px; display: flex; flex-direction: column; align-items: center;
+        gap: 10px; width: min(640px, calc(100vw - 32px)); pointer-events: none;
+        transform: translate(-50%, 24px) scale(.96); opacity: 0;
+        transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .3s; }
+      .ui.active .dock { transform: translate(-50%, 0) scale(1); opacity: 1; }
+      .ui.active .dock > * { pointer-events: auto; }
+      .caption { max-width: 100%; background: var(--bar-bg); color: var(--bar-fg); backdrop-filter: blur(14px);
+        border: 1px solid var(--bar-line); border-radius: 16px; padding: 12px 16px; font-size: 18px; line-height: 1.4;
+        box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+      .caption .meta { font-size: 13px; color: var(--bar-muted); margin-top: 4px; }
+      .caption .meta:empty { display: none; }
+      .caption.error .say { color: #fca5a5; }
+      .bar { display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 999px;
+        background: var(--bar-bg); color: var(--bar-fg); backdrop-filter: blur(14px);
+        border: 1px solid var(--bar-line); box-shadow: 0 12px 36px rgba(0,0,0,.3), 0 0 0 1px rgba(232,116,59,.25); }
+      .bar button { all: unset; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px;
+        border-radius: 999px; font: 500 14px system-ui, sans-serif; color: var(--bar-fg); cursor: pointer; white-space: nowrap; }
+      .bar button:hover { background: rgba(255,255,255,.1); }
+      .bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .bar .mic { width: 40px; padding: 0; justify-content: center; background: var(--accent); font-size: 18px; }
+      .bar .mic:hover { background: var(--accent); filter: brightness(1.1); }
+      .bar .mic.listening { background: #dc2626; animation: pulse-bg 1s infinite; }
+      @keyframes pulse-bg { 50% { box-shadow: 0 0 0 6px rgba(220,38,38,.3); } }
+      .bar .text { all: unset; width: 200px; height: 40px; padding: 0 12px; border-radius: 999px;
+        background: rgba(255,255,255,.08); font: 14px system-ui, sans-serif; color: var(--bar-fg); }
+      .bar .text::placeholder { color: var(--bar-muted); }
+      .bar .sep { width: 1px; height: 22px; background: var(--bar-line); margin: 0 4px; }
+      .bar .close { width: 40px; padding: 0; justify-content: center; color: var(--bar-muted); }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin: 0 6px 0 8px;
+        animation: breathe 1.6s infinite; }
+      @media (max-width: 560px) { .bar .label { display: none; } .bar .text { width: 120px; } }
+      @media (prefers-reduced-motion: reduce) { *, .aura .glow, .aura .edge { animation: none !important; transition: none !important; } }
     </style>
-    <svg class="cursor" viewBox="0 0 24 24"><path d="M3 2l7 19 2.6-7.4L20 11z" fill="#2563eb" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
-    <div class="ring"></div>
-    <div class="bubble"></div>
-    <div class="panel hidden">
-      <div class="row">
-        <button class="mic" title="Hold a conversation">🎤</button>
-        <input class="text" placeholder="Or type: how do I…" />
-      </div>
-      <div class="say">Hi! Press the microphone and tell me what you want to do.</div>
-      <div class="meta"></div>
-      <div class="btns">
-        <button data-cmd="repeat">🔁 Repeat</button>
-        <button data-cmd="next">⏭ Next</button>
-        <button data-cmd="stop">⏹ Stop</button>
+    <div class="ui" data-state="idle">
+      <div class="aura"><div class="glow"></div><div class="edge"></div><div class="flash"></div></div>
+      <svg class="cursor" viewBox="0 0 24 24"><path d="M3 2l7 19 2.6-7.4L20 11z" fill="#e8743b" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      <div class="ring"></div>
+      <div class="bubble"></div>
+      <div class="dock" role="toolbar" aria-label="Guide">
+        <div class="caption" aria-live="polite">
+          <div class="say">Hi! Press the microphone and tell me what you want to do.</div>
+          <div class="meta"></div>
+        </div>
+        <div class="bar">
+          <span class="dot" title="Guide is active"></span>
+          <button class="mic" title="Talk (Alt+G)" aria-label="Talk">🎤</button>
+          <input class="text" placeholder="Or type: how do I…" aria-label="Ask the guide" />
+          <span class="sep"></span>
+          <button data-cmd="repeat" title="Repeat">🔁<span class="label">Repeat</span></button>
+          <button data-cmd="next" title="Next step">⏭<span class="label">Next</span></button>
+          <button data-cmd="stop" title="Stop this task">⏹<span class="label">Stop</span></button>
+          <span class="sep"></span>
+          <button class="close" title="Close the guide (Esc)" aria-label="Close">✕</button>
+        </div>
       </div>
     </div>`;
   document.documentElement.appendChild(host);
 
   const $ = (s) => root.querySelector(s);
-  const cursor = $(".cursor"), ring = $(".ring"), bubble = $(".bubble"), panel = $(".panel");
-  const sayEl = $(".say"), metaEl = $(".meta"), micBtn = $(".mic"), textIn = $(".text");
+  const ui = $(".ui"), cursor = $(".cursor"), ring = $(".ring"), bubble = $(".bubble");
+  const caption = $(".caption"), sayEl = $(".say"), metaEl = $(".meta"), micBtn = $(".mic"), textIn = $(".text");
+
+  // ---------- Activation ----------
+
+  let active = false;
+
+  function activate() {
+    if (active) return;
+    active = true;
+    ui.classList.add("active", "entering");
+    setTimeout(() => ui.classList.remove("entering"), 900);
+  }
+
+  function deactivate() {
+    if (!active) return;
+    active = false;
+    command("stop");
+    ui.classList.remove("active");
+  }
+
+  const setState = (state) => { ui.dataset.state = state; };
 
   // ---------- Pointing ----------
 
@@ -193,8 +265,9 @@
     recognition.interimResults = false;
     recognition.onresult = (e) => handleUtterance(e.results[0][0].transcript);
     recognition.onerror = (e) => setSay(`Microphone: ${e.error}`, true);
-    recognition.onend = () => { recognition = null; micBtn.classList.remove("listening"); };
+    recognition.onend = () => { recognition = null; micBtn.classList.remove("listening"); setState("idle"); };
     micBtn.classList.add("listening");
+    setState("listening");
     recognition.start();
   }
 
@@ -220,7 +293,7 @@
 
   function setSay(text, isError = false) {
     sayEl.textContent = text;
-    sayEl.classList.toggle("error", isError);
+    caption.classList.toggle("error", isError);
   }
 
   async function send(type, payload) {
@@ -233,7 +306,8 @@
     if (busy) return;
     busy = true;
     disarm();
-    panel.classList.remove("hidden");
+    activate();
+    setState("thinking");
     metaEl.textContent = "Looking at your screen…";
     try {
       const elements = collectElements();
@@ -244,6 +318,7 @@
       metaEl.textContent = "";
     } finally {
       busy = false;
+      setState("idle");
     }
   }
 
@@ -318,18 +393,20 @@
   root.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => command(b.dataset.cmd)));
   window.addEventListener("keydown", (e) => {
     // Alt+G: push to talk from anywhere on the page
-    if (e.altKey && e.code === "KeyG") { panel.classList.remove("hidden"); listen(); }
+    if (e.altKey && e.code === "KeyG") { activate(); listen(); }
+    if (e.key === "Escape" && active) deactivate();
   });
+  $(".close").addEventListener("click", deactivate);
 
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "toggle") panel.classList.toggle("hidden");
+    if (msg.type === "toggle") (active ? deactivate() : activate());
   });
 
   // Resume a guided task after a full page navigation
   send("getState")
     .then((state) => {
       if (!state.active) return;
-      panel.classList.remove("hidden");
+      activate();
       lastStep = state.lastStep;
       if (state.pending) setTimeout(() => ask("[clicked target]"), SETTLE_MS);
       else if (lastStep) setSay(lastStep.say);

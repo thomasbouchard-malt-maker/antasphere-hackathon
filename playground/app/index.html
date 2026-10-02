@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ledgerly — invoices</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; --brand: #3b5bdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: var(--ink); background: var(--bg); display: grid;
+    grid-template-columns: 220px 1fr; min-height: 100vh; }
+  nav { background: #111827; color: #d1d5db; padding: 20px 12px; }
+  nav h1 { color: #fff; font-size: 18px; margin: 0 8px 20px; }
+  nav a { display: block; color: inherit; text-decoration: none; padding: 8px 10px; border-radius: 8px; }
+  nav a.on, nav a:hover { background: #1f2937; color: #fff; }
+  main { padding: 28px 36px; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  h2 { margin: 0; font-size: 22px; }
+  .btn { background: var(--brand); color: #fff; border: 0; padding: 9px 16px; border-radius: 8px; font: inherit; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #fef3c7; }
+  .pill.paid { background: #dcfce7; }
+  form { display: grid; gap: 14px; max-width: 520px; }
+  label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+  input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
+  .toast { position: fixed; top: 20px; right: 20px; background: #065f46; color: #fff; padding: 10px 16px; border-radius: 8px; display: none; }
+  @media (max-width: 700px) { body { grid-template-columns: 1fr; } nav { display: none; } main { padding: 20px 16px; } }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Ledgerly</h1>
+  <a href="#invoices" data-page="invoices">Invoices</a>
+  <a href="#clients" data-page="clients">Clients</a>
+  <a href="#settings" data-page="settings">Settings</a>
+</nav>
+<main id="view"></main>
+<div class="toast" id="toast"></div>
+<script>
+  // A deliberately ordinary SaaS app: a few pages, a table, a form. Enough
+  // surface for the guide to find, point at and walk someone through.
+  const invoices = [
+    { n: "INV-0041", client: "Boulangerie Dupont", amount: 480, status: "Paid" },
+    { n: "INV-0042", client: "Atelier Verhaegen", amount: 1250, status: "Sent" },
+    { n: "INV-0043", client: "Garage Peeters", amount: 310, status: "Draft" },
+  ];
+  const clients = ["Boulangerie Dupont", "Atelier Verhaegen", "Garage Peeters"];
+  const view = document.getElementById("view");
+  const toast = (msg) => { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2500); };
+
+  const pages = {
+    invoices: () => `
+      <header><h2>Invoices</h2><button class="btn" onclick="location.hash='new'">New invoice</button></header>
+      <div class="card"><table>
+        <tr><th>Number</th><th>Client</th><th>Amount</th><th>Status</th></tr>
+        ${invoices.map((i) => `<tr><td>${i.n}</td><td>${i.client}</td><td>€${i.amount}</td>
+          <td><span class="pill ${i.status === "Paid" ? "paid" : ""}">${i.status}</span></td></tr>`).join("")}
+      </table></div>`,
+    new: () => `
+      <header><h2>New invoice</h2><button class="btn ghost" onclick="location.hash='invoices'">Cancel</button></header>
+      <div class="card"><form id="f">
+        <label>Client<select name="client">${clients.map((c) => `<option>${c}</option>`).join("")}</select></label>
+        <label>Description<input name="desc" placeholder="What did you do?" required /></label>
+        <label>Amount (€)<input name="amount" type="number" min="1" required /></label>
+        <label>Due date<input name="due" type="date" /></label>
+        <div><button class="btn" type="submit">Create invoice</button></div>
+      </form></div>`,
+    clients: () => `
+      <header><h2>Clients</h2><button class="btn" onclick="toast('Not in this demo')">Add client</button></header>
+      <div class="card"><table><tr><th>Name</th></tr>${clients.map((c) => `<tr><td>${c}</td></tr>`).join("")}</table></div>`,
+    settings: () => `
+      <header><h2>Settings</h2></header>
+      <div class="card"><form onsubmit="event.preventDefault(); toast('Saved')">
+        <label>Company name<input value="My company" /></label>
+        <label>VAT number<input placeholder="BE0123456789" /></label>
+        <label>Currency<select><option>EUR</option><option>USD</option></select></label>
+        <div><button class="btn" type="submit">Save settings</button></div>
+      </form></div>`,
+  };
+
+  function render() {
+    const page = location.hash.slice(1) || "invoices";
+    view.innerHTML = (pages[page] || pages.invoices)();
+    document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === page || (page === "new" && a.dataset.page === "invoices")));
+    const f = document.getElementById("f");
+    if (f) f.onsubmit = (e) => {
+      e.preventDefault();
+      const d = new FormData(f);
+      invoices.push({ n: `INV-00${41 + invoices.length}`, client: d.get("client"), amount: +d.get("amount"), status: "Draft" });
+      location.hash = "invoices";
+      toast("Invoice created");
+    };
+  }
+  addEventListener("hashchange", render);
+  render();
+</script>
+</body>
+</html>
