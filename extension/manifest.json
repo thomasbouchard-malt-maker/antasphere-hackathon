@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Guide — voice + cursor helper",
+  "version": "0.1.0",
+  "description": "Talks you through any web software, pointing at what to click next.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Show / hide the guide" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
